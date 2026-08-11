@@ -1,0 +1,4 @@
+*.o
+send-arp
+Makefile
+.qmake.stash
