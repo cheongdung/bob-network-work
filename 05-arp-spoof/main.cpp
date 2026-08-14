@@ -23,6 +23,9 @@ struct EthArpPacket {
 };
 #pragma pack(pop)
 
+// Ethernet 14바이트 + ARP 28바이트인지 컴파일할 때 확인
+static_assert(sizeof(EthArpPacket) == 42, "EthArpPacket size must be 42");
+
 // sender-target 한 쌍의 정보를 저장
 struct Session {
     Ip senderIp;
@@ -55,7 +58,7 @@ bool getMyInfo(const char* dev, Mac& myMac, Ip& myIp) {
     }
 
     ifreq ifr{};
-    strncpy(ifr.ifr_name, dev, IFNAMSIZ - 1);
+    std::strncpy(ifr.ifr_name, dev, IFNAMSIZ - 1);
 
     if (ioctl(fd, SIOCGIFHWADDR, &ifr) < 0) {
         perror("SIOCGIFHWADDR");
@@ -175,7 +178,8 @@ bool relay(pcap_t* pcap, const pcap_pkthdr* header, const u_char* packet,
         relayEth->smac_ = myMac;
         relayEth->dmac_ = session.targetMac;
 
-        if (pcap_sendpacket(pcap, relayPacket.data(), relayPacket.size()) != 0)
+        if (pcap_sendpacket(pcap, relayPacket.data(),
+                            static_cast<int>(relayPacket.size())) != 0)
             fprintf(stderr, "relay: %s\n", pcap_geterr(pcap));
         return true;
     }
@@ -276,6 +280,7 @@ int main(int argc, char* argv[]) {
     infectAll(pcap, sessions);
     auto lastInfection = std::chrono::steady_clock::now();
 
+    // 단일 스레드이고 sessions를 더 이상 수정하지 않으므로 mutex가 필요 없음
     while (true) {
         auto now = std::chrono::steady_clock::now();
         // 감염이 풀리지 않도록 5초마다 다시 전송
