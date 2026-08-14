@@ -14,7 +14,10 @@ sample : arp-spoof wlan0 192.168.10.2 192.168.10.1 192.168.10.1 192.168.10.2
 ## 실행 결과
 
 #### Attacker
-
+<video src="https://github.com/user-attachments/assets/3fa25f06-15af-4afe-921a-7813538df964"
+       controls
+       width="100%">
+</video>
 [arp-spoof-attacker.mp4](./arp-spoof-attacker.mp4)
 
 #### Victim
