@@ -38,6 +38,23 @@ void usage() {
     std::printf("sample: airodump wlan0\n");
 }
 
+// iw 명령어에 들어갈 인터페이스 이름인지 간단히 검사
+bool validInterface(const std::string& dev) {
+    if (dev.empty())
+        return false;
+
+    return std::all_of(dev.begin(), dev.end(), [](unsigned char ch) {
+        return std::isalnum(ch) || ch == '_' || ch == '-' || ch == '.';
+    });
+}
+
+// 무선 랜카드의 현재 채널을 변경
+bool setChannel(const std::string& dev, int channel) {
+    std::string command = "iw dev " + dev + " set channel " +
+                          std::to_string(channel) + " >/dev/null 2>&1";
+    return std::system(command.c_str()) == 0;
+}
+
 uint16_t readLe16(const uint8_t* p) {
     return static_cast<uint16_t>(p[0]) |
            (static_cast<uint16_t>(p[1]) << 8);
@@ -237,8 +254,13 @@ void processData(const uint8_t* dot11, size_t length,
         it->second.data++;
 }
 
-void printAps(const ApMap& aps) {
-    std::cout << "\033[2J\033[H";
+void printAps(const ApMap& aps, const std::string& dev,
+              int currentChannel) {
+    // 같은 화면에서 표만 새로 그림
+    std::cout << "\033[H\033[J";
+    std::cout << "Interface: " << dev
+              << "   Current CH: " << currentChannel
+              << "   Hopping: 1-13\n\n";
     std::cout << std::left << std::setw(18) << "BSSID"
               << std::right << std::setw(6) << "PWR"
               << std::setw(10) << "Beacons"
@@ -271,8 +293,15 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
+    std::string dev = argv[1];
+    if (!validInterface(dev)) {
+        std::fprintf(stderr, "invalid interface name\n");
+        return EXIT_FAILURE;
+    }
+
     char errbuf[PCAP_ERRBUF_SIZE]{};
-    pcap_t* pcap = pcap_open_live(argv[1], 65535, 1, 1000, errbuf);
+    // timeout을 짧게 주어 패킷이 없어도 채널을 주기적으로 변경
+    pcap_t* pcap = pcap_open_live(dev.c_str(), 65535, 1, 100, errbuf);
     if (pcap == nullptr) {
         std::fprintf(stderr, "pcap_open_live: %s\n", errbuf);
         return EXIT_FAILURE;
@@ -286,7 +315,17 @@ int main(int argc, char* argv[]) {
     }
 
     ApMap aps;
-    auto lastPrint = std::chrono::steady_clock::now();
+
+    // 2.4GHz 채널을 300ms 간격으로 순회
+    const int channels[] = {1, 2, 3, 4, 5, 6, 7,
+                            8, 9, 10, 11, 12, 13};
+    const size_t channelCount = sizeof(channels) / sizeof(channels[0]);
+    size_t channelIndex = 0;
+    int currentChannel = channels[channelIndex];
+    setChannel(dev, currentChannel);
+
+    auto lastHop = std::chrono::steady_clock::now();
+    auto lastPrint = lastHop;
 
     while (true) {
         pcap_pkthdr* header;
@@ -319,8 +358,22 @@ int main(int argc, char* argv[]) {
         }
 
         auto now = std::chrono::steady_clock::now();
-        if (now - lastPrint >= std::chrono::milliseconds(500)) {
-            printAps(aps);
+
+        // 다음 채널로 이동
+        if (now - lastHop >= std::chrono::milliseconds(300)) {
+            channelIndex = (channelIndex + 1) % channelCount;
+            int nextChannel = channels[channelIndex];
+
+            // 지원하지 않는 채널이면 현재 채널 표시는 그대로 유지
+            if (setChannel(dev, nextChannel))
+                currentChannel = nextChannel;
+
+            lastHop = now;
+        }
+
+        // 호핑 주기에 맞춰 현재 채널도 화면에 표시
+        if (now - lastPrint >= std::chrono::milliseconds(300)) {
+            printAps(aps, dev, currentChannel);
             lastPrint = now;
         }
     }
